@@ -224,7 +224,7 @@ def _collate(examples):
 
 def make_loader(
     config, *, batch_size, rank=0, world_size=1, target_size=None, alignment=None,
-    seed=None, tokenizer_config=None,
+    seed=None, tokenizer_config=None, max_text_tokens=None,
 ):
     workers = config.get("num_workers", 0)
     drop_last = config.get("drop_last", False)
@@ -240,7 +240,7 @@ def make_loader(
         native_data = native_config["data"]
         native = dict(
             config=native_config, options=options, target_size=target_size, seed=seed,
-            tokenizer_config=tokenizer_config,
+            tokenizer_config=tokenizer_config, max_text_tokens=max_text_tokens,
         )
         window_batches = native_data["loader"]["length_sort_window_batches"]
         drop_last = config.get("drop_last", native_data["loader"]["drop_last"])

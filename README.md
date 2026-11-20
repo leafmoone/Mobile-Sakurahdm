@@ -2,7 +2,7 @@
 
 实验性训练工程：从 [Mobile-O](https://github.com/Amshaker/Mobile-O) 出发，将生成器换成 [HDM XUT](https://github.com/KohakuBlueleaf/HDM)，将理解与生成共享的多模态语言骨干换成 [Qwen3.5-2B](https://huggingface.co/Qwen/Qwen3.5-2B)，用 [SakuraDatasetService](https://github.com/leafmoone/Sakuradatasetservice) 供数据。
 
-保留 Mobile-O 的分层特征加权与序列细化；新增带掩码的重采样层，把 Qwen 表征映射到预训练 XUT 的原生条件长度和宽度，而不把 padding 当图像条件。新连接器从零开始，DiT 默认从 HDM 初始化，不复用 Mobile-O 的 SANA/FastVLM 权重。生成使用 HDM 配套的 EQ-SDXL VAE、逐通道 latent 归一化、flow matching 和 Euler 采样。理解训练只给答案 token 计损失。
+保留 Mobile-O 的层融合、序列细化和宽度投影，不再做 256 槽重采样。XUT 读取全部有效文本 token；同一微批次里按实际长度分组，padding 不进入连接器细化层或 XUT。新连接器从零开始，DiT 默认从 HDM 初始化，不复用 Mobile-O 的 SANA/FastVLM 权重。生成使用 HDM 配套的 EQ-SDXL VAE、逐通道 latent 归一化、flow matching 和 Euler 采样。理解训练只给答案 token 计损失。
 
 ## 安装
 
@@ -41,7 +41,7 @@ python -m pip install -e ../Sakuradatasetservice
 
 ### SakuraMoon 数据
 
-三套 HDM 配置都使用 SDS 的分片租约和 SakuraMoon 的数据处理，不单独重做 caption 规则。它们从授权的 SakuraMoon checkout 加载 `config/base.toml`（可叠加自己的数据配置），复用 WebDataset 样本读取、元数据解析、图像处理，以及 tags/NL/candidate、画师或角色条件、dropout 和原生 Qwen 序列化。原生数据路径不会再应用一轮 Mobile-O 文本 dropout。启用 ARB 时使用 SakuraMoon 的桶和裁剪，关闭时改为 HDM 随机偏移方形裁剪，caption 不受 ARB 开关影响。SakuraMoon 专用的模型条件向量、训练数据服务内部实现及实验性相机裁剪不属于这个适配层。
+三套 HDM 配置都使用 SDS 的分片租约和 SakuraMoon 的数据处理，不单独重做 caption 规则。它们从授权的 SakuraMoon checkout 加载 `config/base.toml`（可叠加自己的数据配置），复用 WebDataset 样本读取、元数据解析、图像处理，以及 tags/NL/candidate、画师或角色条件、dropout 和原生 Qwen 序列化。原生数据路径不会再应用一轮 Mobile-O 文本 dropout。文生图训练和采样的文本上限由 `training.tokenizer_kwargs.max_length` 控制，默认 512 token（包括 Qwen 模板和角色/画师条件）；原生数据仍按 SakuraMoon 的完整字段边界处理超长 caption，不把每条文本补到固定长度。启用 ARB 时使用 SakuraMoon 的桶和裁剪，关闭时改为 HDM 随机偏移方形裁剪，caption 不受 ARB 开关影响。SakuraMoon 专用的模型条件向量、训练数据服务内部实现及实验性相机裁剪不属于这个适配层。
 
 运行前启动 SDS，让 `data.socket_path` 指向对应 socket。准备好 SakuraMoon checkout（本文适配时使用 `08ed12c67a271463396d6402e750ed8746c4bd7d`），再运行：
 
@@ -52,7 +52,7 @@ bash scripts/train_768.sh --stage /path/to/local-768.yaml
 bash scripts/train_1024.sh --stage /path/to/local-1024.yaml
 ```
 
-本机配置可改 `data.socket_path`、`training.batch_size`（单卡微批次）、`training.trainer.devices` 和输出路径。后续阶段可通过 `training.init_checkpoint` 加载上一阶段的 `trainable.safetensors`；同阶段用 `--resume /path/to/checkpoint.ckpt` 恢复 Lightning 状态。要关闭 1024 的分桶，在命令末尾加 `--stage configs/no-buckets.yaml`。SDS 维护分片租约，不能把 Lightning 恢复理解成样本级精确重放。Lightning 全量断点比训练权重导出大得多，按磁盘空间调整 `training.checkpoint_steps`。
+本机配置可改 `data.socket_path`、`training.batch_size`（单卡微批次）、`training.trainer.devices` 和输出路径。后续阶段可通过 `training.init_checkpoint` 加载上一阶段的 `trainable.safetensors`；同阶段用 `--resume /path/to/checkpoint.ckpt` 恢复 Lightning 状态。要关闭 1024 的分桶，在命令末尾加 `--stage configs/no-buckets.yaml`。SDS 维护分片租约，不能把 Lightning 恢复理解成样本级精确重放。Lightning 全量断点比训练权重导出大得多，按磁盘空间调整 `training.checkpoint_steps`。带旧重采样层的 Lightning 断点不能直接 `--resume`，可从旧的 `trainable.safetensors` 初始化同名权重；旧连接器输出条件与新版不同。
 
 ## 原版任务配置
 

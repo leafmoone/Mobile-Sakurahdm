@@ -109,7 +109,8 @@ class HDMFlowModule(pl.LightningModule):
             rank=self.global_rank, world_size=self.trainer.world_size,
             target_size=cfg["target_size"],
             alignment=self.model.latent_scale_factor*self.model.dit.config.patch_size,
-            seed=cfg["seed"], tokenizer_config={"name_or_path": qwen["name_or_path"],
+            seed=cfg["seed"], max_text_tokens=cfg.get("tokenizer_kwargs", {}).get("max_length"),
+            tokenizer_config={"name_or_path": qwen["name_or_path"],
                                                "tokenizer_kwargs": qwen.get("processor_kwargs", {})})
 
     def on_train_start(self):

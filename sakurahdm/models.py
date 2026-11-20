@@ -12,17 +12,11 @@ from .xut_activations import use_powlu_in_xut
 class HDMConditioningProjector(LayerwiseMobileFusion):
     """Mobile-O layer mixing and sequence refinement at the XUT context width."""
 
-    def __init__(
-        self, input_dim, output_dim, context_tokens, num_attention_heads, **kwargs
-    ):
-        super().__init__(input_dim=input_dim, output_dim=output_dim, **kwargs)
-        width = self.input_compress[0].out_features
-        self.queries = nn.Parameter(
-            torch.randn(context_tokens, width) / math.sqrt(width)
-        )
-        self.resampler = nn.MultiheadAttention(
-            width, num_attention_heads, batch_first=True
-        )
+    def _project(self, fused):
+        tokens = self.input_compress(fused.to(self.input_compress[0].weight))
+        for refiner in self.sequence_refiners:
+            tokens = refiner(tokens)
+        return self.output_proj(tokens)
 
     def forward(self, hidden_states, attention_mask):
         weights = torch.softmax(self.layer_weights / self.temperature, dim=0)
@@ -30,22 +24,28 @@ class HDMConditioningProjector(LayerwiseMobileFusion):
             weight * state
             for weight, state in zip(weights, hidden_states[-self.num_layers :])
         )
-        tokens = self.input_compress(fused.to(self.queries))
-        queries = self.queries.expand(tokens.size(0), -1, -1)
-        # XUT's joint attention does not consume an encoder padding mask.
-        tokens = (
-            queries
-            + self.resampler(
-                queries,
-                tokens,
-                tokens,
-                key_padding_mask=~attention_mask.bool(),
-                need_weights=False,
-            )[0]
+
+        # Neither the convolutional refiners nor XUT joint attention can
+        # ignore padding. Group exact token lengths and compact each group.
+        mask = attention_mask.bool()
+        lengths = mask.sum(dim=1).tolist()
+        rows_by_length = {}
+        for row, length in enumerate(lengths):
+            rows_by_length.setdefault(length, []).append(row)
+        if len(rows_by_length) == 1:
+            length = lengths[0]
+            if length != fused.size(1):
+                fused = fused[mask].reshape(fused.size(0), length, fused.size(-1))
+            return self._project(fused)
+
+        compact = fused[mask].split(lengths)
+        return tuple(
+            (
+                torch.tensor(rows, device=fused.device),
+                self._project(torch.stack([compact[row] for row in rows])),
+            )
+            for rows in rows_by_length.values()
         )
-        for refiner in self.sequence_refiners:
-            tokens = refiner(tokens)
-        return self.output_proj(tokens)
 
 
 class MobileSakuraHDM(nn.Module):
@@ -103,13 +103,40 @@ class MobileSakuraHDM(nn.Module):
             if self.dit.config.addon_info_embs_dim
             else None
         )
-        return self.dit(
-            latents,
-            timesteps.to(latents),
-            encoder_hidden_states=context.to(latents),
-            added_cond_kwargs=extras,
-            pos_map=None if pos_map is None else pos_map.to(device=latents.device, dtype=torch.float32),
-        ).sample
+        time = timesteps.to(latents)
+        if pos_map is not None:
+            pos_map = pos_map.to(device=latents.device, dtype=torch.float32)
+
+        def predict(x, t, tokens, positions, extra):
+            return self.dit(
+                x,
+                t,
+                encoder_hidden_states=tokens.to(x),
+                added_cond_kwargs=extra,
+                pos_map=positions,
+            ).sample
+
+        if isinstance(context, torch.Tensor):
+            return predict(latents, time, context, pos_map, extras)
+
+        outputs, rows = [], []
+        for indices, tokens in context:
+            extra = (
+                {"addon_info": aspect.index_select(0, indices)}
+                if extras is not None
+                else None
+            )
+            outputs.append(
+                predict(
+                    latents.index_select(0, indices),
+                    time.index_select(0, indices),
+                    tokens,
+                    pos_map.index_select(0, indices) if pos_map is not None else None,
+                    extra,
+                )
+            )
+            rows.append(indices)
+        return torch.cat(outputs).index_select(0, torch.cat(rows).argsort())
 
     def language_loss(self, qwen_inputs, labels):
         hidden = self.qwen.model(**qwen_inputs, use_cache=False).last_hidden_state
@@ -201,7 +228,6 @@ def build_model(config):
     connector = HDMConditioningProjector(
         input_dim=qwen.config.text_config.hidden_size,
         output_dim=dit.config.ctx_dim,
-        context_tokens=dit.config.ctx_size,
         **config["connector"],
     )
     return MobileSakuraHDM(

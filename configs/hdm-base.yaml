@@ -12,7 +12,6 @@ data:
 model:
   connector:
     hidden_dim: 512
-    num_attention_heads: 8
     num_layers: 8
     num_refinement_blocks: 2
   hdm:
@@ -46,6 +45,7 @@ training:
   batch_size: 1
   chat_kwargs:
     enable_thinking: false
+  tokenizer_kwargs: {max_length: 512, truncation: true}
   checkpoint_steps: 250
   dit_gradient_checkpointing: true
   grad_clip: 1.0

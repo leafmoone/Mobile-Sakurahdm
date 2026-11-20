@@ -57,8 +57,13 @@ def sample(model, processor, prompt, *, config, source_image=None, negative_prom
 
     def condition(text):
         if native_caption and images is None:
-            inputs = processor.tokenizer.pad({"input_ids": [list(serialize_prompt(text, processor.tokenizer))]},
-                                             padding=True, return_tensors="pt")
+            ids = serialize_prompt(
+                text, processor.tokenizer,
+                max_text_tokens=(prompt_options["tokenizer_kwargs"] or {}).get("max_length"),
+            )
+            inputs = processor.tokenizer.pad(
+                {"input_ids": [list(ids)]}, padding=True, return_tensors="pt"
+            )
         else:
             inputs = encode_prompts(processor, [text], images, **prompt_options)
         return model.condition(inputs.to(device))

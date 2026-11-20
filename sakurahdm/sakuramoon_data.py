@@ -51,7 +51,7 @@ def leased_samples(path):
 
 
 class NativeSampleProcessor:
-    def __init__(self, config, options, target_size, *, seed, tokenizer_config):
+    def __init__(self, config, options, target_size, *, seed, tokenizer_config, max_text_tokens):
         from sakuramoon.config.schema import DataTransparentBackgroundConfig
         from sakuramoon.data.metadata import MetadataFieldMapping
         from transformers import AutoTokenizer
@@ -72,6 +72,7 @@ class NativeSampleProcessor:
             **tokenizer_config.get("tokenizer_kwargs", {}),
         )
         self.framing = caption_framing(self.tokenizer)
+        self.max_text_tokens = max_text_tokens
 
     def prepare(self, metadata, raw, *, key, shard, bucketed):
         from sakuramoon.data.image_ops import ImageMetadataError, normalize_image
@@ -114,7 +115,12 @@ class NativeSampleProcessor:
             return None
 
         plan = self.captions.plan(fields, rng.caption_seed)
-        serialized = self.captions.serialize(plan, self.tokenizer, self.framing)
+        serialized = self.captions.serialize(
+            plan, self.tokenizer, self.framing, max_text_tokens=self.max_text_tokens
+        )
+        dense_length = serialized.dense_length
+        if self.max_text_tokens is not None:
+            dense_length = min(dense_length, self.max_text_tokens)
         return {
             "target_image": target,
             "prompt": serialized.body,
@@ -122,7 +128,7 @@ class NativeSampleProcessor:
             "caption_prepared": True,
             "crop_seed": rng.crop_seed,
             "caption_seed": rng.caption_seed,
-            "dense_length": serialized.dense_length,
+            "dense_length": dense_length,
             "sample_id": rng.sample_id,
             "cycle_index": rng.cycle_index,
             "source_shard": shard.record.path,
