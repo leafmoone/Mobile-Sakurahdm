@@ -1,0 +1,4 @@
+# Use after a preset: --stage configs/no-buckets.yaml
+data:
+  buckets:
+    enabled: false

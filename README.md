@@ -25,7 +25,36 @@ python -m pip install -e ../Sakuradatasetservice
 
 训练和采样默认将 XUT 的全部 SwiGLU MLP 换成 [PowLU 的双投影版本](https://arxiv.org/html/2605.25704v1#S3.SS1)（默认 `m=3`，可用 `model.hdm.powlu_m` 调整），不改 Qwen、连接器或 AdaLN 的 Mish。原有 `w12`、`w3` 投影及权重名不变，可加载原 HDM 权重；如需复现 SwiGLU 基线，把 `model.hdm.powlu_m` 设为 YAML 的 `null`。从旧权重继续训练时，权重兼容不意味着切换激活后输出等同。
 
-## 三段训练
+## HDM 训练
+
+三套脚本都走 HDM 风格的 Lightning flow matching：以 logit-normal 采样时间，目标为 `noise - latent`。TREAD 的 token 路由默认关闭，原有前后段保留，仍可加载原 HDM 权重。对齐阶段冻结 Qwen 与 VAE，训练 XUT 和 Mobile-O 条件连接器（MCP）。
+
+| 脚本 | 分辨率 | 全局 batch | 精度 | XUT / MCP 学习率 | ARB |
+|---|---:|---:|---|---|---|
+| `scripts/train_512.sh` | 512 | 512 | FP16 mixed | `2e-5 / 2e-4` | 关 |
+| `scripts/train_768.sh` | 768 | 384 | FP16 mixed | `2e-5 / 2e-4` | 关 |
+| `scripts/train_1024.sh` | 1024 | 256 | FP16 mixed | `1e-5 / 1e-4` | 开 |
+
+表中的学习率是预热后的绝对值，不使用 HDM 示例里的 μP 倍率。三套配置沿用 1000 步预热、余弦降到 1% 的比例、AdamW `betas=(0.9, 0.995)` 和梯度裁剪 1。运行前按显存调节微批次和设备数；梯度累积按目标全局 batch 计算。
+
+`configs/align.yaml` 的原 512 数值不变。原 Accelerate 入口保留用于已有的对齐、生成 SFT、联合 VQA 和配对编辑配置；旧的 `trainable.safetensors` 可用于初始化，旧 Accelerate 优化器状态不作为 Lightning 断点使用。
+
+### SakuraMoon 数据
+
+三套 HDM 配置都使用 SDS 的分片租约和 SakuraMoon 的数据处理，不单独重做 caption 规则。它们从授权的 SakuraMoon checkout 加载 `config/base.toml`（可叠加自己的数据配置），复用 WebDataset 样本读取、元数据解析、图像处理，以及 tags/NL/candidate、画师或角色条件、dropout 和原生 Qwen 序列化。原生数据路径不会再应用一轮 Mobile-O 文本 dropout。启用 ARB 时使用 SakuraMoon 的桶和裁剪，关闭时改为 HDM 随机偏移方形裁剪，caption 不受 ARB 开关影响。SakuraMoon 专用的模型条件向量、训练数据服务内部实现及实验性相机裁剪不属于这个适配层。
+
+运行前启动 SDS，让 `data.socket_path` 指向对应 socket。准备好 SakuraMoon checkout（本文适配时使用 `08ed12c67a271463396d6402e750ed8746c4bd7d`），再运行：
+
+```bash
+export SAKURAMOON_ROOT=/path/to/SakuraMoon
+bash scripts/train_512.sh --stage /path/to/local-512.yaml
+bash scripts/train_768.sh --stage /path/to/local-768.yaml
+bash scripts/train_1024.sh --stage /path/to/local-1024.yaml
+```
+
+本机配置可改 `data.socket_path`、`training.batch_size`（单卡微批次）、`training.trainer.devices` 和输出路径。后续阶段可通过 `training.init_checkpoint` 加载上一阶段的 `trainable.safetensors`；同阶段用 `--resume /path/to/checkpoint.ckpt` 恢复 Lightning 状态。要关闭 1024 的分桶，在命令末尾加 `--stage configs/no-buckets.yaml`。SDS 维护分片租约，不能把 Lightning 恢复理解成样本级精确重放。Lightning 全量断点比训练权重导出大得多，按磁盘空间调整 `training.checkpoint_steps`。
+
+## 原版任务配置
 
 | 阶段 | 数据 | 更新参数 |
 |---|---|---|
@@ -49,6 +78,16 @@ accelerate launch -m sakurahdm.train configs/align.yaml --stage configs/joint.ya
 WebDataset TAR 的同样本成员连续存放。字段映射支持成员后缀、JSON 子字段或顺序候选，例如 `jpg`、`json/captions/nl2`、`[avif, jpg]`。理解图映射到 `source_image`；普通联合四元组的理解图可与生成目标共用同一成员。也可配置 `qna: qna.txt` 读取 Mobile-O 的问题/答案。编辑是独立可选任务，用训练好的源图 latent 残差与 Qwen 图像条件；须用真实源图、编辑指令、目标图成对训练，不能从普通 caption 或 HDM 的初始权重直接获得编辑能力。
 
 ## 采样
+
+HDM 三套配置采样时沿用训练时的 `SAKURAMOON_ROOT`，先传共享 YAML，再传对应分辨率。若训练期间修改了模型配置（例如 PowLU 参数），采样也要加同一份覆盖配置：
+
+```bash
+python -m sakurahdm.sample configs/hdm-base.yaml configs/hdm-1024.yaml \
+  --checkpoint /path/to/trainable.safetensors \
+  --prompt 'an illustration of a red fox in a snowy forest' --output fox.png
+```
+
+原任务配置采样示例：
 
 ```bash
 python -m sakurahdm.sample configs/align.yaml \

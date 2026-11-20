@@ -72,9 +72,10 @@ class MobileSakuraHDM(nn.Module):
 
     @torch.no_grad()
     def encode_images(self, pixels, generator=None):
-        posterior = self.vae.encode(
-            pixels.to(self.vae.device, self.vae.dtype)
-        ).latent_dist
+        with torch.autocast(device_type=self.vae.device.type, enabled=False):
+            posterior = self.vae.encode(
+                pixels.to(self.vae.device, self.vae.dtype)
+            ).latent_dist
         latents = posterior.sample(generator=generator)
         return (latents.float() - self.latents_mean) / self.latents_std
 
@@ -89,15 +90,16 @@ class MobileSakuraHDM(nn.Module):
         )
         return self.connector(output.hidden_states, qwen_inputs["attention_mask"])
 
-    def denoise(self, noisy_latents, timesteps, context, source_latents=None):
+    def denoise(self, noisy_latents, timesteps, context, source_latents=None, pos_map=None, aspect_ratio=None):
         latents = noisy_latents.to(self.dit.dtype)
         if source_latents is not None and self.source_adapter is not None:
             latents = latents + self.source_adapter(
                 source_latents.to(self.source_adapter.weight)
             ).to(latents)
-        aspect = math.log(latents.size(-1) / latents.size(-2))
+        aspect = (latents.new_full((latents.size(0),), math.log(latents.size(-1)/latents.size(-2)))
+                  if aspect_ratio is None else aspect_ratio.to(latents))
         extras = (
-            {"addon_info": latents.new_full((latents.size(0),), aspect)}
+            {"addon_info": aspect}
             if self.dit.config.addon_info_embs_dim
             else None
         )
@@ -106,6 +108,7 @@ class MobileSakuraHDM(nn.Module):
             timesteps.to(latents),
             encoder_hidden_states=context.to(latents),
             added_cond_kwargs=extras,
+            pos_map=None if pos_map is None else pos_map.to(device=latents.device, dtype=torch.float32),
         ).sample
 
     def language_loss(self, qwen_inputs, labels):
@@ -124,11 +127,13 @@ class MobileSakuraHDM(nn.Module):
         labels=None,
         source_latents=None,
         language_inputs=None,
+        pos_map=None,
+        aspect_ratio=None,
     ):
         if noisy_latents is None:
             return self.language_loss(qwen_inputs, labels)
         velocity = self.denoise(
-            noisy_latents, timesteps, self.condition(qwen_inputs), source_latents
+            noisy_latents, timesteps, self.condition(qwen_inputs), source_latents, pos_map, aspect_ratio
         )
         if labels is not None:
             return velocity, self.language_loss(language_inputs, labels)
@@ -170,6 +175,10 @@ def _load_hdm(config):
         dit = PretrainedXUT.from_pretrained(
             config["name_or_path"], **_diffusers_kwargs(config)
         )
+    # Keep pretrained pre/post TREAD blocks. Zero routing dropout retains every token;
+    # use_tread=False would incorrectly bypass those trained transformations.
+    if config.get("tread", {}).get("enabled") is False and dit.model.use_tread:
+        dit.model.dropout_ratio = 0.0
     m = config.get("powlu_m", 3.0)
     if m is not None:
         use_powlu_in_xut(dit, m)

@@ -1,0 +1,18 @@
+# Overlay on hdm-base.yaml. Override socket_path for your running SDS service.
+data:
+  socket_path: data/hdm-1024/data.sock
+  sakuramoon:
+    stage: hdm-1024
+  buckets:
+    enabled: true
+training:
+  output_dir: runs/hdm-1024
+  target_size:
+  - 1024
+  - 1024
+  max_steps: 14254
+  global_batch_size: 256
+  optimizer:
+    lr: 1.0e-05
+    weight_decay: 0.002
+  connector_lr: 0.0001

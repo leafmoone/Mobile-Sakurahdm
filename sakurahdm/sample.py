@@ -7,7 +7,7 @@ from PIL import Image
 
 
 @torch.inference_mode()
-def euler_flow(model, latents, context, *, steps, guidance_scale, negative=None, source=None):
+def euler_flow(model, latents, context, *, steps, guidance_scale, negative=None, source=None, pos_map=None, aspect_ratio=None):
     dtype = latents.dtype
     latents = latents.float()
     # HDM predicts noise - data with t=1 at pure noise and t=0 at the image.
@@ -15,10 +15,10 @@ def euler_flow(model, latents, context, *, steps, guidance_scale, negative=None,
     for t, next_t in zip(times[:-1], times[1:]):
         timestep = t.expand(latents.shape[0])
         model_input = latents.to(dtype)
-        velocity = model.denoise(model_input, timestep, context, source_latents=source).float()
+        velocity = model.denoise(model_input, timestep, context, source_latents=source, pos_map=pos_map, aspect_ratio=aspect_ratio).float()
         if negative is not None:
             unconditional = model.denoise(
-                model_input, timestep, negative, source_latents=source
+                model_input, timestep, negative, source_latents=source, pos_map=pos_map, aspect_ratio=aspect_ratio
             ).float()
             velocity = unconditional.lerp(velocity, guidance_scale)
         latents = latents + (next_t - t) * velocity
@@ -48,8 +48,20 @@ def sample(model, processor, prompt, *, config, source_image=None, negative_prom
         "tokenizer_kwargs": training.get("tokenizer_kwargs"),
     }
 
+    native_caption = "sakuramoon" in config.get("data", {})
+    if native_caption and images is None:
+        from .sakuramoon_data import sakuramoon_root
+
+        sakuramoon_root()
+        from .caption import serialize_prompt
+
     def condition(text):
-        return model.condition(encode_prompts(processor, [text], images, **prompt_options).to(device))
+        if native_caption and images is None:
+            inputs = processor.tokenizer.pad({"input_ids": [list(serialize_prompt(text, processor.tokenizer))]},
+                                             padding=True, return_tensors="pt")
+        else:
+            inputs = encode_prompts(processor, [text], images, **prompt_options)
+        return model.condition(inputs.to(device))
 
     context = condition(prompt)
     guidance_scale = options["guidance_scale"]
@@ -60,9 +72,14 @@ def sample(model, processor, prompt, *, config, source_image=None, negative_prom
     scale = model.latent_scale_factor
     latent_shape = (1, model.dit.config.input_dim, height // scale, width // scale)
     latents = torch.randn(latent_shape, device=device, generator=generator)
+    pos_map = aspect_ratio = None
+    if native_caption:
+        from xut.modules.axial_rope import make_axial_pos_no_cache
+        pos_map = make_axial_pos_no_cache(*latents.shape[-2:], device=device)[None]
+        aspect_ratio = latents.new_tensor([width / height])
     latents = euler_flow(
         model, latents, context, steps=options["steps"], guidance_scale=guidance_scale,
-        negative=negative, source=source,
+        negative=negative, source=source, pos_map=pos_map, aspect_ratio=aspect_ratio,
     )
     return to_image(model.decode_latents(latents))
 

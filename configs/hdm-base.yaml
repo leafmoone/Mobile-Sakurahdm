@@ -1,0 +1,72 @@
+# Shared native HDM training configuration. Layer a resolution preset with --stage.
+data:
+  task: t2i
+  num_workers: 2
+  drop_last: true
+  sakuramoon:
+    config_paths:
+    - config/base.toml
+    metadata_member: json
+    id_field: id
+  request_timeout_seconds: 30
+model:
+  connector:
+    hidden_dim: 512
+    num_attention_heads: 8
+    num_layers: 8
+    num_refinement_blocks: 2
+  hdm:
+    load_kwargs:
+      subfolder: transformer
+      torch_dtype: float32
+    name_or_path: KBlueLeaf/HDM-xut-340M-anime
+    xut:
+      TORCH_COMPILE: false
+      USE_LIGER: false
+      USE_VANILLA: false
+      USE_XFORMERS: false
+      USE_XFORMERS_LAYERS: false
+    tread:
+      enabled: false
+  qwen:
+    load_kwargs:
+      attn_implementation: sdpa
+      dtype: float16
+    name_or_path: Qwen/Qwen3.5-2B
+    processor_kwargs: {}
+  vae:
+    load_kwargs:
+      subfolder: vae
+      torch_dtype: float32
+    name_or_path: KBlueLeaf/HDM-xut-340M-anime
+sample:
+  guidance_scale: 3.0
+  steps: 24
+training:
+  batch_size: 1
+  chat_kwargs:
+    enable_thinking: false
+  checkpoint_steps: 250
+  dit_gradient_checkpointing: true
+  grad_clip: 1.0
+  log_steps: 10
+  mixed_precision: fp16
+  optimizer:
+    lr: 2.0e-05
+    betas:
+    - 0.9
+    - 0.995
+  qwen_gradient_checkpointing: false
+  scheduler:
+    name: cosine
+    num_warmup_steps: 1000
+    min_lr_ratio: 0.01
+  seed: 42
+  trainable:
+  - connector
+  - dit
+  connector_lr: 0.0002
+  trainer:
+    accelerator: gpu
+    devices: 1
+    precision: 16-mixed
