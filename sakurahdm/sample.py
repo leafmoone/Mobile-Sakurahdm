@@ -48,24 +48,10 @@ def sample(model, processor, prompt, *, config, source_image=None, negative_prom
         "tokenizer_kwargs": training.get("tokenizer_kwargs"),
     }
 
-    native_caption = "sakuramoon" in config.get("data", {})
-    if native_caption and images is None:
-        from .sakuramoon_data import sakuramoon_root
-
-        sakuramoon_root()
-        from .caption import serialize_prompt
+    native_geometry = "sakuramoon" in config.get("data", {})
 
     def condition(text):
-        if native_caption and images is None:
-            ids = serialize_prompt(
-                text, processor.tokenizer,
-                max_text_tokens=(prompt_options["tokenizer_kwargs"] or {}).get("max_length"),
-            )
-            inputs = processor.tokenizer.pad(
-                {"input_ids": [list(ids)]}, padding=True, return_tensors="pt"
-            )
-        else:
-            inputs = encode_prompts(processor, [text], images, **prompt_options)
+        inputs = encode_prompts(processor, [text], images, **prompt_options)
         return model.condition(inputs.to(device))
 
     context = condition(prompt)
@@ -78,7 +64,7 @@ def sample(model, processor, prompt, *, config, source_image=None, negative_prom
     latent_shape = (1, model.dit.config.input_dim, height // scale, width // scale)
     latents = torch.randn(latent_shape, device=device, generator=generator)
     pos_map = aspect_ratio = None
-    if native_caption:
+    if native_geometry:
         from xut.modules.axial_rope import make_axial_pos_no_cache
         pos_map = make_axial_pos_no_cache(*latents.shape[-2:], device=device)[None]
         aspect_ratio = latents.new_tensor([width / height])

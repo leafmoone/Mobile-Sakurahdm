@@ -13,6 +13,7 @@ from safetensors.torch import load_file, save_file
 from torch.nn import functional as F
 from transformers import get_scheduler
 
+from .caption_text import encode_text
 from .models import build_model, build_processor
 
 
@@ -68,41 +69,15 @@ def _prompts(processor, prompts, images, chat_kwargs):
 
 
 def encode_prompts(processor, prompts, images=None, *, chat_kwargs=None, tokenizer_kwargs=None):
-    text = _prompts(processor, prompts, images, chat_kwargs)
     if images is None:
         tokenizer = processor.tokenizer
-        options = dict(tokenizer_kwargs or {})
-        limit = options.pop("max_length", None)
-        if limit is None:
-            return tokenizer(text, padding=True, return_tensors="pt", **options)
-        options.pop("truncation", None)
-        pad_multiple = options.pop("pad_to_multiple_of", None)
-        encoded = tokenizer(text, return_offsets_mapping=True, **options)
-        offsets = encoded.pop("offset_mapping")
-        if any(len(ids) > limit for ids in encoded["input_ids"]):
-            # Locate user content in the rendered template; only its tokens can be removed.
-            marker = "SAKURAHDM_PROMPT_BODY"
-            frame, = _prompts(processor, [marker], None, chat_kwargs)
-            prefix, suffix = frame.split(marker, 1)
-            for i, (rendered, spans) in enumerate(zip(text, offsets)):
-                excess = len(spans) - limit
-                if excess <= 0:
-                    continue
-                if not rendered.startswith(prefix) or not rendered.endswith(suffix):
-                    raise ValueError("Cannot locate the text prompt within the chat template")
-                body_end = len(rendered) - len(suffix)
-                body_tokens = [j for j, (left, right) in enumerate(spans)
-                               if len(prefix) <= left < right <= body_end]
-                if len(body_tokens) < excess:
-                    raise ValueError("max_length is too small for the chat template")
-                remove = set(body_tokens[-excess:])
-                for rows in encoded.values():
-                    rows[i] = [token for j, token in enumerate(rows[i]) if j not in remove]
-        # Never let padding round the context above its configured text cap.
-        if pad_multiple and any((len(ids)+pad_multiple-1)//pad_multiple*pad_multiple > limit
-                                for ids in encoded["input_ids"]):
-            pad_multiple = None
-        return tokenizer.pad(encoded, padding=True, pad_to_multiple_of=pad_multiple, return_tensors="pt")
+        limit = (tokenizer_kwargs or {}).get("max_length")
+        rows = []
+        for prompt in prompts:
+            ids = encode_text(tokenizer, prompt, max_text_tokens=limit)
+            rows.append({"input_ids": ids, "attention_mask": [1] * len(ids)})
+        return tokenizer.pad(rows, padding=True, return_tensors="pt")
+    text = _prompts(processor, prompts, images, chat_kwargs)
     return processor(text=text, images=images, padding=True, return_tensors="pt")
 
 

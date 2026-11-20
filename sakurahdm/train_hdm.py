@@ -25,8 +25,8 @@ def flow_batch(clean):
 def caption_inputs(processor, examples, training, sources=None):
     if all(example.get("caption_prepared") for example in examples) and sources is None:
         return processor.tokenizer.pad([
-            {"input_ids": list(e["serialized_caption"].input_ids),
-             "attention_mask": list(e["serialized_caption"].attention_mask)} for e in examples
+            {"input_ids": list(e["input_ids"]), "attention_mask": [1] * len(e["input_ids"])}
+            for e in examples
         ], padding=True, return_tensors="pt")
     prompts = [e["prompt"] for e in examples]
     if probability := training.get("prompt_dropout", 0):

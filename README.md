@@ -41,7 +41,9 @@ python -m pip install -e ../Sakuradatasetservice
 
 ### SakuraMoon 数据
 
-三套 HDM 配置都使用 SDS 的分片租约和 SakuraMoon 的数据处理，不单独重做 caption 规则。它们从授权的 SakuraMoon checkout 加载 `config/base.toml`（可叠加自己的数据配置），复用 WebDataset 样本读取、元数据解析、图像处理，以及 tags/NL/candidate、画师或角色条件、dropout 和原生 Qwen 序列化。原生数据路径不会再应用一轮 Mobile-O 文本 dropout。文生图训练和采样的文本上限由 `training.tokenizer_kwargs.max_length` 控制，默认 512 token（包括 Qwen 模板和角色/画师条件）；原生数据仍按 SakuraMoon 的完整字段边界处理超长 caption，不把每条文本补到固定长度。启用 ARB 时使用 SakuraMoon 的桶和裁剪，关闭时改为 HDM 随机偏移方形裁剪，caption 不受 ARB 开关影响。SakuraMoon 专用的模型条件向量、训练数据服务内部实现及实验性相机裁剪不属于这个适配层。
+三套 HDM 配置都使用 SDS 的分片租约，从 SakuraMoon checkout 加载 `config/base.toml`（可叠加自己的数据配置），复用 WebDataset、元数据解析、图像处理、标签和自然语言的选择及 dropout。文生图训练和采样直接编码纯文本，不加 system 指令或对话标记。数据中的画师标签、角色标签都排在普通标签前，不二选一，也不走独立条件分支。标签和自然语言描述之间保留一个空行；超长时先去掉整段描述，再按完整标签从尾部删减。上限由 `training.tokenizer_kwargs.max_length` 控制，默认 512 token。空提示词和全条件 dropout 共用一个无正文的 token，不重复做文本 dropout。编辑和 VQA 仍走 Qwen 原生多模态模板。
+
+启用 ARB 时使用 SakuraMoon 的桶和裁剪，关闭时改为 HDM 随机偏移方形裁剪，caption 不受 ARB 开关影响。SakuraMoon 专用的模型条件向量、训练数据服务内部实现及实验性相机裁剪不属于这个适配层。
 
 运行前启动 SDS，让 `data.socket_path` 指向对应 socket。准备好 SakuraMoon checkout（本文适配时使用 `08ed12c67a271463396d6402e750ed8746c4bd7d`），再运行：
 
@@ -52,7 +54,7 @@ bash scripts/train_768.sh --stage /path/to/local-768.yaml
 bash scripts/train_1024.sh --stage /path/to/local-1024.yaml
 ```
 
-本机配置可改 `data.socket_path`、`training.batch_size`（单卡微批次）、`training.trainer.devices` 和输出路径。后续阶段可通过 `training.init_checkpoint` 加载上一阶段的 `trainable.safetensors`；同阶段用 `--resume /path/to/checkpoint.ckpt` 恢复 Lightning 状态。要关闭 1024 的分桶，在命令末尾加 `--stage configs/no-buckets.yaml`。SDS 维护分片租约，不能把 Lightning 恢复理解成样本级精确重放。Lightning 全量断点比训练权重导出大得多，按磁盘空间调整 `training.checkpoint_steps`。带旧重采样层的 Lightning 断点不能直接 `--resume`，可从旧的 `trainable.safetensors` 初始化同名权重；旧连接器输出条件与新版不同。
+本机配置可改 `data.socket_path`、`training.batch_size`（单卡微批次）、`training.trainer.devices` 和输出路径。后续阶段可通过 `training.init_checkpoint` 加载上一阶段的 `trainable.safetensors`；同阶段用 `--resume /path/to/checkpoint.ckpt` 恢复 Lightning 状态。要关闭 1024 的分桶，在命令末尾加 `--stage configs/no-buckets.yaml`。SDS 维护分片租约，不能把 Lightning 恢复理解成样本级精确重放。Lightning 全量断点比训练权重导出大得多，按磁盘空间调整 `training.checkpoint_steps`。带旧重采样层的 Lightning 断点不能直接 `--resume`，可从旧的 `trainable.safetensors` 初始化同名权重；旧连接器输出条件与新版不同。已有按聊天模板训练的权重切到纯文本时，虽然模型参数形状兼容，也不能当作等价的断点续跑。
 
 ## 原版任务配置
 
@@ -79,7 +81,7 @@ WebDataset TAR 的同样本成员连续存放。字段映射支持成员后缀�
 
 ## 采样
 
-HDM 三套配置采样时沿用训练时的 `SAKURAMOON_ROOT`，先传共享 YAML，再传对应分辨率。若训练期间修改了模型配置（例如 PowLU 参数），采样也要加同一份覆盖配置：
+HDM 三套配置采样时先传共享 YAML，再传对应分辨率；纯文本采样不需要加载 SakuraMoon 数据配置。若训练期间修改了模型配置（例如 PowLU 参数），采样也要加同一份覆盖配置：
 
 ```bash
 python -m sakurahdm.sample configs/hdm-base.yaml configs/hdm-1024.yaml \

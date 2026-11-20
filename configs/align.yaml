@@ -42,7 +42,7 @@ training:
   qwen_gradient_checkpointing: false
   dit_gradient_checkpointing: true
   grad_clip: 1.0
-  tokenizer_kwargs: {max_length: 512, truncation: true}
+  tokenizer_kwargs: {max_length: 512}
   chat_kwargs: {enable_thinking: false}
   prompt_dropout: 0.1
   log_steps: 10
