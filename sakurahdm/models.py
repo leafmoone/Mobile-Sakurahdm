@@ -6,6 +6,8 @@ from torch.nn import functional as F
 
 from mobileo.model.mobile_block import LayerwiseMobileFusion
 
+from .xut_activations import use_powlu_in_xut
+
 
 class HDMConditioningProjector(LayerwiseMobileFusion):
     """Mobile-O layer mixing and sequence refinement at the XUT context width."""
@@ -163,10 +165,15 @@ def _load_hdm(config):
         from_config = classmethod(ConfigMixin.from_config.__func__)
 
     if "architecture" in config:
-        return PretrainedXUT.from_config(config["architecture"])
-    return PretrainedXUT.from_pretrained(
-        config["name_or_path"], **_diffusers_kwargs(config)
-    )
+        dit = PretrainedXUT.from_config(config["architecture"])
+    else:
+        dit = PretrainedXUT.from_pretrained(
+            config["name_or_path"], **_diffusers_kwargs(config)
+        )
+    m = config.get("powlu_m", 3.0)
+    if m is not None:
+        use_powlu_in_xut(dit, m)
+    return dit
 
 
 def build_model(config):

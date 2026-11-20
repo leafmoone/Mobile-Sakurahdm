@@ -21,6 +21,10 @@ python -m pip install -e ../Sakuradatasetservice
 
 模型 ID、本地权重路径、dtype、分辨率、数据字段及训练参数都由 YAML 提供；可添加 `--stage` 覆盖相应项，不用改代码。为可复现训练可在每个模型的 `load_kwargs`（以及 Qwen 的 `processor_kwargs`）传入需要的 `revision`。
 
+### XUT 门控激活
+
+训练和采样默认将 XUT 的全部 SwiGLU MLP 换成 [PowLU 的双投影版本](https://arxiv.org/html/2605.25704v1#S3.SS1)（默认 `m=3`，可用 `model.hdm.powlu_m` 调整），不改 Qwen、连接器或 AdaLN 的 Mish。原有 `w12`、`w3` 投影及权重名不变，可加载原 HDM 权重；如需复现 SwiGLU 基线，把 `model.hdm.powlu_m` 设为 YAML 的 `null`。从旧权重继续训练时，权重兼容不意味着切换激活后输出等同。
+
 ## 三段训练
 
 | 阶段 | 数据 | 更新参数 |
