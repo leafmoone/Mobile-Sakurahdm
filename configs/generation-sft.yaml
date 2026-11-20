@@ -1,0 +1,6 @@
+data:
+  socket_path: data/generation-sft/data.sock
+training:
+  output_dir: runs/generation-sft
+  init_checkpoint: runs/align/checkpoint-1000/trainable.safetensors
+  optimizer: {lr: 0.00002, weight_decay: 0.01}

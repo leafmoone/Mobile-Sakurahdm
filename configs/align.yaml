@@ -1,0 +1,53 @@
+model:
+  qwen:
+    name_or_path: Qwen/Qwen3.5-2B
+    load_kwargs: {dtype: bfloat16, attn_implementation: sdpa}
+    processor_kwargs: {}
+  hdm:
+    name_or_path: KBlueLeaf/HDM-xut-340M-anime
+    load_kwargs: {subfolder: transformer, torch_dtype: float32}
+    xut:
+      TORCH_COMPILE: false
+      USE_LIGER: false
+      USE_VANILLA: false
+      USE_XFORMERS: false
+      USE_XFORMERS_LAYERS: false
+  vae:
+    name_or_path: KBlueLeaf/HDM-xut-340M-anime
+    load_kwargs: {subfolder: vae, torch_dtype: float32}
+  connector:
+    hidden_dim: 512
+    num_layers: 8
+    num_refinement_blocks: 2
+    num_attention_heads: 8
+data:
+  task: t2i
+  socket_path: data/align/data.sock
+  num_workers: 2
+  request_timeout_seconds: 30
+  drop_last: true
+  fields:
+    target_image: [avif, webp, jpg, jpeg, png]
+    prompt: [json/captions/nl2, json/captions/nl3, json/multicaptions/short, txt]
+training:
+  output_dir: runs/align
+  max_steps: 1000
+  seed: 42
+  mixed_precision: bf16
+  gradient_accumulation_steps: 4
+  batch_size: 2
+  target_size: [512, 512]
+  trainable: [connector, dit]
+  optimizer: {lr: 0.00005, weight_decay: 0.01}
+  scheduler: {name: cosine, num_warmup_steps: 100}
+  qwen_gradient_checkpointing: false
+  dit_gradient_checkpointing: true
+  grad_clip: 1.0
+  tokenizer_kwargs: {max_length: 256, truncation: true}
+  chat_kwargs: {enable_thinking: false}
+  prompt_dropout: 0.1
+  log_steps: 10
+  checkpoint_steps: 250
+sample:
+  steps: 24
+  guidance_scale: 3.0

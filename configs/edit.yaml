@@ -1,0 +1,14 @@
+model:
+  source_adapter: true
+data:
+  task: edit
+  socket_path: data/edit/data.sock
+  fields:
+    target_image: target.png
+    source_image: source.png
+    prompt: [json/instruction, txt]
+training:
+  output_dir: runs/edit
+  init_checkpoint: runs/generation-sft/checkpoint-1000/trainable.safetensors
+  trainable: [connector, dit, source_adapter]
+  optimizer: {lr: 0.00001, weight_decay: 0.01}

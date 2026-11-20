@@ -1,0 +1,21 @@
+data:
+  task: joint
+  socket_path: data/joint/data.sock
+  fields:
+    target_image: [jpg, png, webp, avif]
+    source_image: [jpg, png, webp, avif]
+    prompt: [json/prompt, txt]
+    question: json/question
+    answer: json/answer
+training:
+  output_dir: runs/joint
+  init_checkpoint: runs/generation-sft/checkpoint-1000/trainable.safetensors
+  trainable: [connector, dit, qwen.model.visual]
+  qwen_gradient_checkpointing: true
+  qwen_lora:
+    r: 16
+    lora_alpha: 32
+    target_modules: [q_proj, k_proj, v_proj, o_proj]
+  flow_weight: 1.0
+  language_weight: 0.2
+  optimizer: {lr: 0.00001, weight_decay: 0.01}

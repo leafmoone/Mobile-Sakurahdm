@@ -1,0 +1,9 @@
+model:
+  hdm:
+    xut:
+      TORCH_COMPILE: true
+      USE_LIGER: false
+      USE_VANILLA: false
+      USE_XFORMERS: false
+      USE_XFORMERS_LAYERS: false
+      COMPILE_ARGS: {mode: max-autotune-no-cudagraphs, dynamic: true}
