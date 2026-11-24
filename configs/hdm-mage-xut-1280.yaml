@@ -1,0 +1,35 @@
+# Append last. Dedicated experiment; never resume a 4-channel checkpoint here.
+model:
+  hdm:
+    architecture:
+      patch_size: 1
+      input_dim: 128
+      dim: 1280
+      ctx_dim: 1024
+      ctx_size: 256
+      heads: 20
+      dim_head: 64
+      mlp_dim: 4096
+      depth: 4
+      enc_blocks: 1
+      dec_blocks: 3
+      dec_ctx: false
+      class_cond: 0
+      shared_adaln: true
+      concat_ctx: true
+      use_dyt: false
+      double_t: false
+      addon_info_embs_dim: 1
+      tread_config: {dropout_ratio: 0.5, prev_trns_depth: 1, post_trns_depth: 3}
+    tread: {enabled: true}
+  vae:
+    mage:
+      checkpoint: models/Mage-Flow-Base/vae/diffusion_pytorch_model.safetensors
+      checkpoint_sha256: 34e076dc1e8a15321e1e07be5111d59cf16dd10b804b7c7e20b4de29013427e0
+      dtype: bfloat16
+      frozen: true
+      latent_channels: 128
+      downsample_factor: 16
+      sample_posterior: false
+training:
+  output_dir: runs/hdm-mage-xut-1280

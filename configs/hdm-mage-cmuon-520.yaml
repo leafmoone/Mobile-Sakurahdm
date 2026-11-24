@@ -1,0 +1,13 @@
+# Append after the Mage-XUT stage. New optimizer state; never restore AdamW state.
+training:
+  output_dir: runs/hdm-mage-xut-1280-cmuon-520
+  batch_size: 10
+  global_batch_size: 520
+  trainer:
+    devices: 2
+    strategy: ddp
+    accumulate_grad_batches: 26
+  hybrid_cmuon:
+    momentum: 0.95
+    cmuon_lr_multiplier: 1.0
+    adamw_lr_multiplier: 0.6
