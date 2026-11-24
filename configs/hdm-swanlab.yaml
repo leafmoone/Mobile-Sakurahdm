@@ -1,0 +1,3 @@
+training:
+  # Unscaled, pre-clip L2 gradient norm at every loss logging boundary.
+  grad_norm_every: 10
