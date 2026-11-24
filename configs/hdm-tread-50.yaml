@@ -1,0 +1,6 @@
+# Opt in for pretrained XUT-340M. Keep the pretrained XUT's 0.5 routing ratio in train mode.
+# Sampling in eval mode still uses the full token sequence.
+model:
+  hdm:
+    tread:
+      enabled: true
